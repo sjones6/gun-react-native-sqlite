@@ -74,7 +74,8 @@ module.exports = new KeyValAdapter({
         this.tableName = sqlOpt.table || "GunTable";
 
         this.db.transaction(tx => {
-            tx.executeSql(`CREATE TABLE IF NOT EXISTS ${this.tableName} (keyField, key, field, val, rel, state, type)`, [], 
+            //tx.executeSql(`DROP TABLE ${this.tableName}`, [],
+            tx.executeSql(`CREATE TABLE IF NOT EXISTS ${this.tableName} (keyField PRIMARY KEY, key, field, val, rel, state, type)`, [], 
             (tx, rs) => console.log("Table created."), 
             (tx, error) => sqlOpt.onError(error));
         });
@@ -93,7 +94,10 @@ module.exports = new KeyValAdapter({
             this.db.transaction(tx => {
                 tx.executeSql(
                     `SELECT * FROM ${this.tableName} WHERE key = ?`, [key],
-                    (tx, results) => done(null, results.rows.raw().map(processRow)),
+                    (tx, results) => {
+                        console.log(results.rows.length);
+                        done(null, results.rows.raw().map(processRow))
+                    },
                     (tx, err) => done(err)
                 );
             });
@@ -103,7 +107,7 @@ module.exports = new KeyValAdapter({
         const inserts = batch.map(node => {
             const keyField = `${node.key}_${node.field}`;
             return {
-                sql: `INSERT OR REPLACE INTO ${this.tableName} (keyField, key, field, val, rel, state, type) VALUES (?,?,?, COALESCE(?, ""),COALESCE(?, ""),?,?)`,
+                sql: `INSERT OR REPLACE INTO ${this.tableName} (keyField, key, field, val, rel, state, type) VALUES (?,?,?, COALESCE(?, ""),COALESCE(?, ""),COALESCE(?, 0),COALESCE(?, 3))`,
                 vars: [keyField, node.key, node.field, node.val + "", node.rel + "", node.state, coerce(node.val), keyField]
             };
         });
