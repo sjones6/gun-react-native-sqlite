@@ -3,6 +3,10 @@
     "version": "0.0.1",
     "author": "sjones6",
     "main": "index.js",
+    "description": "A Gun <> SQLite Adapter for React Native",
+    "keywords": [
+        "GunJS", "SQLite", "React Native", "persistance", "graph"
+    ],
     "dependencies": {
         "react-native-sqlite-storage": "^3.3.3"
     }
