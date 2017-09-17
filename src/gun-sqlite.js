@@ -96,7 +96,19 @@ const adapter = new KeyValAdapter({
     }
 });
 
+/**
+ * Clean out old graph data from the DB given a timestamp
+ * 
+ * @todo Implement a smarter, configurable LRU algorithm.
+ * 
+ * @param {integer}  number   The timestamp to delete before which to delete all data
+ * @param {function} cb       A function to call after success/error  
+ */
 adapter.clean = function(timestamp, cb) {
+    if (!timestamp) {
+        return;
+    }
+
     const ctx = this.outerContext;
     ctx.db.transaction(
         tx => tx.executeSql(`DELETE FROM ${ctx.tableName} WHERE state < ?`, [timestamp]),
