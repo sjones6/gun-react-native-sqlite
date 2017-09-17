@@ -1,86 +1,53 @@
 import KeyValAdapter from './key-val-adapter';
 import SQLite from 'react-native-sqlite-storage';
+import coerce from './coerce';
+import processRow from './process-row';
 
-const TYPES = {
-    STRING: 0,
-    NUMBER: 1,
-    BOOLEAN: 2,
-    NULL: 3
-};
+const adapter = new KeyValAdapter({
 
-function coerce(val, type) {
-    if (type === undefined) {
-        switch(typeof val) {
-            case "string":
-                return TYPES.STRING;
-                break;
-            case "number":
-                return TYPES.NUMBER;
-                break;
-            case "boolean":
-                return TYPES.BOOLEAN;
-                break;
-            default:
-                return TYPES.NULL;
-        }
-    } else {
-        switch(parseInt(type)) {
-            case TYPES.NUMBER:
-                return parseFloat(val);
-                break;
-            case TYPES.BOOLEAN:
-                return val === "true";
-                break;
-            case TYPES.NULL:
-                return null
-                break;
-            default:
-                return val;
-        }
-    }
-}
-
-const processRow = row => {
-    if (row.rel === "undefined") {
-        delete row.rel;
-        if (row.val === "undefined" || row.rel === "null") {
-            row.val = null;
-        } else {
-            row.val = coerce(row.val, row.type);
-        }
-    } else {
-        delete row.val;
-    }
-    return row;
-}
-
-module.exports = new KeyValAdapter({
+    /**
+     * @param {Gun}          ctx   The gun instance serving the Gun db
+     * @param {object|null}  opt   Options passed when instantiating Gun, if any
+     * @param {boolean}      once  When called via `gun.opt`, `once` is true; during construction, it is false
+     */
     opt: function(ctx, opt, once) {
         if (once) { 
             return;
         }
 
+        // Acquire DB connection
         const sqlOpt = opt.sqlite || {};
+        sqlOpt.onReady = opt.onReady || (() => {});
         this.db = SQLite.openDatabase({
                 name: sqlOpt.database_name || "GunDB.db",
-                location: sqlOpt.database_location || "default",
-                version: sqlOpt.database_version || "1.0",
-                displayName: sqlOpt.database_displayname || "GunDB SQLite",
-                size: sqlOpt.database_size || 20000,
+                location: sqlOpt.database_location || "default"
             },
             sqlOpt.onOpen || (() => {}),
             sqlOpt.onError || (() => {})
         );
         this.tableName = sqlOpt.table || "GunTable";
 
-        this.db.transaction(tx => {
-            //tx.executeSql(`DROP TABLE ${this.tableName}`, [],
-            tx.executeSql(`CREATE TABLE IF NOT EXISTS ${this.tableName} (keyField PRIMARY KEY, key, field, val, rel, state, type)`, [], 
-            (tx, rs) => console.log("Table created."), 
-            (tx, error) => sqlOpt.onError(error));
-        });
+        // Prepare the DB for writes with table and indexes
+        this.db.transaction(
+            tx => {
+                tx.executeSql(`CREATE TABLE IF NOT EXISTS ${this.tableName} (keyField PRIMARY KEY, key, field, val, rel, state, type)`, []);
+                tx.executeSql(`CREATE INDEX IF NOT EXISTS ${this.tableName}_index ON ${this.tableName} (keyField, key)`, [])
+            },
+            err => sqlOpt.onError(err),
+            () => sqlOpt.onReady.call(null)
+        );
     },
+
+    /**
+     * Retrieve Nodes from SQLiteStorage
+     * 
+     * @param {string}   key        The node key to lookup
+     * @param {string}   [field]    The field to lookup, if given
+     * @param {function} done       Callback for when lookup finishes
+     */
     get: function(key, field, done) {
+
+        // Retrieve field only
         if (field) {
             this.db.transaction(tx => {
                 const keyField = `${key}_${field}`;
@@ -90,20 +57,28 @@ module.exports = new KeyValAdapter({
                     (tx, err) => done(err)
                 );
             });
+
+        // Retrieve entire node
         } else {
             this.db.transaction(tx => {
                 tx.executeSql(
                     `SELECT * FROM ${this.tableName} WHERE key = ?`, [key],
-                    (tx, results) => {
-                        console.log(results.rows.length);
-                        done(null, results.rows.raw().map(processRow))
-                    },
+                    (tx, results) => done(null, results.rows.raw().map(processRow)),
                     (tx, err) => done(err)
                 );
             });
         }
     },
+
+    /**
+     * Write nodes to storage
+     * 
+     * @param {Array.object}  batch    The batch writes of key:value pairs
+     * @param {function}      done     Called after write is complete
+     */
     put: function(batch, done) {
+
+        // Produce an array of upsert queries
         const inserts = batch.map(node => {
             const keyField = `${node.key}_${node.field}`;
             return {
@@ -111,6 +86,8 @@ module.exports = new KeyValAdapter({
                 vars: [keyField, node.key, node.field, node.val + "", node.rel + "", node.state, coerce(node.val), keyField]
             };
         });
+
+        // Run transations
         this.db.transaction(
             tx => inserts.forEach(row => tx.executeSql(row.sql, row.vars)),
             err => done(this.errors.internal),
@@ -118,3 +95,15 @@ module.exports = new KeyValAdapter({
         );
     }
 });
+
+adapter.clean = function(timestamp, cb) {
+    const ctx = this.outerContext;
+    ctx.db.transaction(
+        tx => tx.executeSql(`DELETE FROM ${ctx.tableName} WHERE state < ?`, [timestamp]),
+        cb,
+        cb
+    );
+}
+
+
+module.exports = adapter;

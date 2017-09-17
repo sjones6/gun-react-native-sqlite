@@ -111,7 +111,7 @@ export default class BaseAdapter {
             context.on('put', pluginInterop(_this._write));
         });
 
-        return this.Gun;
+        return this;
     }
     
     /**
